@@ -424,13 +424,16 @@
         <div class="features">
             <h3>Features</h3>
             <ul class="feature-list">
+                <li>Processes multiple test cases from single Excel file</li>
+                <li>Creates separate Word documents for each test case</li>
                 <li>Dynamic document title with test case name from Excel</li>
-                <li>Customizable header fields (Date, Tester, Version, etc.)</li>
+                <li>Customizable header fields (MRN, Department, Environment, etc.)</li>
                 <li>Three-column table (Step Name, Expected, Actual) without serial number</li>
                 <li>Empty rows after each data entry for image insertion</li>
                 <li>Professional formatting with borders and styling</li>
                 <li>Configurable column mapping and starting row</li>
                 <li>Add/remove custom fields as needed</li>
+                <li>Automatic file name sanitization for safe downloads</li>
             </ul>
         </div>
     </div>
@@ -604,6 +607,47 @@
             return index - 1;
         }
 
+        function parseMultipleTestCases(data, testcaseColIndex, startRow) {
+            const testCases = [];
+            let currentTestCase = null;
+            
+            for (let i = startRow; i < data.length; i++) {
+                const row = data[i];
+                if (!row || row.length === 0) continue;
+                
+                const testCaseValue = row[testcaseColIndex];
+                
+                // Check if this row starts a new test case (has a value in test case column)
+                if (testCaseValue && testCaseValue.toString().trim()) {
+                    // Save previous test case if exists
+                    if (currentTestCase) {
+                        testCases.push(currentTestCase);
+                    }
+                    
+                    // Start new test case
+                    currentTestCase = {
+                        name: testCaseValue.toString().trim(),
+                        steps: []
+                    };
+                } else if (currentTestCase) {
+                    // This is a step row for the current test case
+                    currentTestCase.steps.push(row);
+                }
+            }
+            
+            // Don't forget to add the last test case
+            if (currentTestCase) {
+                testCases.push(currentTestCase);
+            }
+            
+            return testCases;
+        }
+
+        function sanitizeFileName(fileName) {
+            // Remove or replace invalid characters for file names
+            return fileName.replace(/[<>:"/\\|?*]/g, '_').trim();
+        }
+
         async function convertToWord() {
             if (!selectedFile) {
                 showStatus('Please select an Excel file first.', 'error');
@@ -624,7 +668,7 @@
             try {
                 convertBtn.disabled = true;
                 const progressInterval = showProgress(true);
-                showStatus('Converting Excel to Word...', 'success');
+                showStatus('Processing multiple test cases...', 'success');
 
                 // Get configuration values
                 const testcaseCol = testcaseColInput.value.toUpperCase() || 'A';
@@ -644,57 +688,72 @@
                 // Convert to array of arrays
                 const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
-                // Get test case name from A2 (row 2, column A)
-                const testCaseName = data[1] && data[1][0] ? data[1][0].toString() : 'Unknown Test Case';
-
                 // Get column indices
                 const testcaseColIndex = columnToIndex(testcaseCol);
                 const stepColIndex = columnToIndex(stepCol);
                 const expectedColIndex = columnToIndex(expectedCol);
                 const actualColIndex = columnToIndex(actualCol);
 
-                // Create Word document
-                const doc = new docx.Document({
-                    sections: [{
-                        properties: {},
-                        children: [
-                            // Main title
-                            new docx.Paragraph({
-                                children: [
-                                    new docx.TextRun({
-                                        text:  testCaseName,
-                                        bold: true,
-                                        size: 32,
-                                    })
-                                ],
-                                heading: docx.HeadingLevel.TITLE,
-                                alignment: docx.AlignmentType.CENTER,
-                                spacing: { after: 300 }
-                            }),
-                            
-                            // Custom fields
-                            ...createCustomFieldsParagraphs(customFields),
-                            
-                            // Add spacing before table
-                            new docx.Paragraph({
-                                children: [new docx.TextRun({ text: "" })],
-                                spacing: { after: 200 }
-                            }),
-                            
-                            // Table
-                            createTable(data, stepColIndex, expectedColIndex, actualColIndex, startRow)
-                        ]
-                    }]
-                });
+                // Parse multiple test cases
+                const testCases = parseMultipleTestCases(data, testcaseColIndex, startRow - 1);
+                
+                if (testCases.length === 0) {
+                    showStatus('No test cases found in the Excel file.', 'error');
+                    return;
+                }
 
-                // Generate and download the document
+                let processedCount = 0;
+                
+                // Create and download a document for each test case
+                for (const testCase of testCases) {
+                    const doc = new docx.Document({
+                        sections: [{
+                            properties: {},
+                            children: [
+                                // Main title
+                                new docx.Paragraph({
+                                    children: [
+                                        new docx.TextRun({
+                                            text: testCase.name,
+                                            bold: true,
+                                            size: 32,
+                                        })
+                                    ],
+                                    heading: docx.HeadingLevel.TITLE,
+                                    alignment: docx.AlignmentType.CENTER,
+                                    spacing: { after: 300 }
+                                }),
+                                
+                                // Custom fields
+                                ...createCustomFieldsParagraphs(customFields),
+                                
+                                // Add spacing before table
+                                new docx.Paragraph({
+                                    children: [new docx.TextRun({ text: "" })],
+                                    spacing: { after: 200 }
+                                }),
+                                
+                                // Table
+                                createTableForTestCase(testCase.steps, stepColIndex, expectedColIndex, actualColIndex)
+                            ]
+                        }]
+                    });
+
+                    // Generate and download the document
+                    const buffer = await docx.Packer.toBlob(doc);
+                    const fileName = `${sanitizeFileName(testCase.name)}.docx`;
+                    saveAs(buffer, fileName);
+                    
+                    processedCount++;
+                    
+                    // Small delay between downloads to prevent browser issues
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                }
+
                 clearInterval(progressInterval);
                 progressFill.style.width = '100%';
-                
-                const buffer = await docx.Packer.toBlob(doc);
-                saveAs(buffer, `${outputName}.docx`);
 
-                showStatus('Document converted and downloaded successfully!', 'success');
+                showStatus(`Successfully created ${processedCount} Word documents for ${processedCount} test cases!`, 'success');
                 setTimeout(() => {
                     showProgress(false);
                 }, 1000);
@@ -737,12 +796,10 @@
             return paragraphs;
         }
 
-        function createTable(data, stepColIndex, expectedColIndex, actualColIndex, startRow) {
+        function createTableForTestCase(steps, stepColIndex, expectedColIndex, actualColIndex) {
             const tableRows = [];
 
-            // Create table with only 3 columns: Step Name, Expected, Actual
-            for (let i = startRow - 1; i < data.length; i++) {
-                const row = data[i];
+            for (const row of steps) {
                 const stepValue = row[stepColIndex] || '';
                 const expectedValue = row[expectedColIndex] || '';
                 const actualValue = row[actualColIndex] || '';
