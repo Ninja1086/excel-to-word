@@ -125,6 +125,7 @@
             margin-bottom: 20px;
             color: #333;
             text-align: center;
+            font-size: 1.2rem;
         }
 
         .config-row {
@@ -140,7 +141,7 @@
             color: #555;
         }
 
-        .config-input {
+        .config-input, .config-textarea {
             flex: 1;
             padding: 8px 12px;
             border: 2px solid #ddd;
@@ -149,7 +150,12 @@
             transition: border-color 0.3s ease;
         }
 
-        .config-input:focus {
+        .config-textarea {
+            min-height: 60px;
+            resize: vertical;
+        }
+
+        .config-input:focus, .config-textarea:focus {
             outline: none;
             border-color: #667eea;
         }
@@ -297,6 +303,7 @@
             background: #c82333;
             transform: scale(1.1);
         }
+
         /* Responsive styles for smaller screens */
         @media (max-width: 600px) {
             .container {
@@ -317,7 +324,7 @@
                 min-width: auto;
             }
             
-            .config-input {
+            .config-input, .config-textarea {
                 width: 100%;
             }
         }
@@ -342,7 +349,19 @@
         </div>
 
         <div class="config-section">
-            <div class="config-title">Configuration Settings</div>
+            <div class="config-title">Header & Footer Settings</div>
+            <div class="config-row">
+                <label class="config-label">Header Text:</label>
+                <textarea class="config-textarea" id="header-text" placeholder="Enter text for document header (e.g., Test Case Documentation - Quality Assurance Department)">Test Case Documentation</textarea>
+            </div>
+            <div class="config-row">
+                <label class="config-label">Footer Text:</label>
+                <textarea class="config-textarea" id="footer-text" placeholder="Enter text for document footer (e.g., Confidential - Internal Use Only)">© Company Name - Confidential</textarea>
+            </div>
+        </div>
+
+        <div class="config-section">
+            <div class="config-title">Excel Column Configuration</div>
             <div class="config-row">
                 <label class="config-label">Test Case Column:</label>
                 <input type="text" class="config-input" id="testcase-col" value="A" maxlength="2" placeholder="e.g., A">
@@ -427,6 +446,7 @@
                 <li>Processes multiple test cases from single Excel file</li>
                 <li>Creates separate Word documents for each test case</li>
                 <li>Dynamic document title with test case name from Excel</li>
+                <li>Customizable header and footer text fields</li>
                 <li>Customizable header fields (MRN, Department, Environment, etc.)</li>
                 <li>Three-column table (Step Name, Expected, Actual) without serial number</li>
                 <li>Empty rows after each data entry for image insertion</li>
@@ -434,6 +454,7 @@
                 <li>Configurable column mapping and starting row</li>
                 <li>Add/remove custom fields as needed</li>
                 <li>Automatic file name sanitization for safe downloads</li>
+                <li>Date and page numbering automatically included</li>
             </ul>
         </div>
     </div>
@@ -459,7 +480,10 @@
         const actualColInput = document.getElementById('actual-col');
         const startRowInput = document.getElementById('start-row');
         const outputNameInput = document.getElementById('output-name');
-        const titlePrefixInput = document.getElementById('title-prefix');
+        
+        // Header/Footer inputs
+        const headerTextInput = document.getElementById('header-text');
+        const footerTextInput = document.getElementById('footer-text');
 
         // Field management functions
         function addField() {
@@ -648,6 +672,129 @@
             return fileName.replace(/[<>:"/\\|?*]/g, '_').trim();
         }
 
+        function createHeader(headerText) {
+            const headerLines = headerText.split('\n').filter(line => line.trim());
+            const headerParagraphs = [];
+            
+            headerLines.forEach((line, index) => {
+                headerParagraphs.push(
+                    new docx.Paragraph({
+                        children: [
+                            new docx.TextRun({
+                                text: line.trim(),
+                                bold: index === 0, // First line bold
+                                size: index === 0 ? 22 : 18
+                            })
+                        ],
+                        alignment: docx.AlignmentType.CENTER,
+                        spacing: { after: index === headerLines.length - 1 ? 200 : 50 }
+                    })
+                );
+            });
+
+            // Add date
+            headerParagraphs.push(
+                new docx.Paragraph({
+                    children: [
+                        new docx.TextRun({
+                            text: `Date: ${new Date().toLocaleDateString()}`,
+                            size: 16
+                        })
+                    ],
+                    alignment: docx.AlignmentType.CENTER,
+                    spacing: { after: 100 }
+                })
+            );
+
+            return {
+                default: new docx.Header({
+                    children: [
+                        ...headerParagraphs,
+                        new docx.Paragraph({
+                            children: [new docx.TextRun({ text: "" })],
+                            border: {
+                                bottom: {
+                                    color: "000000",
+                                    space: 1,
+                                    style: docx.BorderStyle.SINGLE,
+                                    size: 6
+                                }
+                            }
+                        })
+                    ]
+                })
+            };
+        }
+
+        function createFooter(footerText) {
+            const footerLines = footerText.split('\n').filter(line => line.trim());
+            const footerParagraphs = [];
+
+            // Add border at top
+            footerParagraphs.push(
+                new docx.Paragraph({
+                    children: [new docx.TextRun({ text: "" })],
+                    border: {
+                        top: {
+                            color: "000000",
+                            space: 1,
+                            style: docx.BorderStyle.SINGLE,
+                            size: 6
+                        }
+                    },
+                    spacing: { before: 100 }
+                })
+            );
+
+            // Add footer text lines
+            footerLines.forEach((line, index) => {
+                footerParagraphs.push(
+                    new docx.Paragraph({
+                        children: [
+                            new docx.TextRun({
+                                text: line.trim(),
+                                size: 14,
+                                italics: true
+                            })
+                        ],
+                        alignment: docx.AlignmentType.CENTER,
+                        spacing: { after: 50 }
+                    })
+                );
+            });
+
+            // Add page numbers
+            footerParagraphs.push(
+                new docx.Paragraph({
+                    children: [
+                        new docx.TextRun({
+                            text: "Page ",
+                            size: 14
+                        }),
+                        new docx.TextRun({
+                            children: [docx.PageNumber.CURRENT],
+                            size: 14
+                        }),
+                        new docx.TextRun({
+                            text: " of ",
+                            size: 14
+                        }),
+                        new docx.TextRun({
+                            children: [docx.PageNumber.TOTAL_PAGES],
+                            size: 14
+                        })
+                    ],
+                    alignment: docx.AlignmentType.CENTER
+                })
+            );
+
+            return {
+                default: new docx.Footer({
+                    children: footerParagraphs
+                })
+            };
+        }
+
         async function convertToWord() {
             if (!selectedFile) {
                 showStatus('Please select an Excel file first.', 'error');
@@ -678,6 +825,10 @@
                 const startRow = parseInt(startRowInput.value) || 2;
                 const outputName = outputNameInput.value || 'test_results';
                 const customFields = getCustomFields();
+                
+                // Get header/footer text
+                const headerText = headerTextInput.value || 'Test Case Documentation';
+                const footerText = footerTextInput.value || '© Company Name - Confidential';
 
                 // Read Excel file
                 const arrayBuffer = await selectedFile.arrayBuffer();
@@ -709,6 +860,8 @@
                     const doc = new docx.Document({
                         sections: [{
                             properties: {},
+                            headers: createHeader(headerText),
+                            footers: createFooter(footerText),
                             children: [
                                 // Main title
                                 new docx.Paragraph({
@@ -814,19 +967,19 @@
                             children: [new docx.Paragraph({
                                 children: [new docx.TextRun({ text: stepValue.toString() })]
                             })],
-                            width: { size: 33, type: docx.WidthType.PERCENTAGE }
+                            width: { size: 14, type: docx.WidthType.PERCENTAGE }
                         }),
                         new docx.TableCell({
                             children: [new docx.Paragraph({
                                 children: [new docx.TextRun({ text: expectedValue.toString() })]
                             })],
-                            width: { size: 33, type: docx.WidthType.PERCENTAGE }
+                            width: { size: 43, type: docx.WidthType.PERCENTAGE }
                         }),
                         new docx.TableCell({
                             children: [new docx.Paragraph({
                                 children: [new docx.TextRun({ text: actualValue.toString() })]
                             })],
-                            width: { size: 34, type: docx.WidthType.PERCENTAGE }
+                            width: { size: 43, type: docx.WidthType.PERCENTAGE }
                         })
                     ]
                 }));
